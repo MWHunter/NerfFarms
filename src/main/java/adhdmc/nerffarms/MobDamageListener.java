@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
+import org.bukkit.block.Block;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -66,7 +67,33 @@ public class MobDamageListener implements Listener {
         }
 
         Location playerLoc = p.getLocation();
-        Pathfinder.PathResult entityPath = m.getPathfinder().findPath(p);
+
+        // Let's find the block the player is "on"
+        // A player's hitbox is always 0.6 blocks wide
+        // If a player is jumping, then let's find the block below where they currently are
+        // If the player is on the edge of a block, let's find the block the player is sneaking on
+        double minHitboxX = playerLoc.getX() - 0.3;
+        double maxHitboxX = playerLoc.getX() + 0.3;
+        double minHitboxZ = playerLoc.getZ() - 0.3;
+        double maxHitboxZ = playerLoc.getZ() + 0.3;
+
+        // Loop Y last, so we search lower layers after higher layers
+        // 6 is arbitrary, but sort of lines up with 2 block hitbox + 3 block reach + 1 block rounding
+        outer: for (int y = (int) Math.floor(playerLoc.getY()); y > playerLoc.getY() - 6; y--) {
+            for (int x = (int) Math.floor(minHitboxX); x <= Math.floor(maxHitboxX); x++) {
+                for (int z = (int) Math.floor(minHitboxZ); z <= Math.floor(maxHitboxZ); z++) {
+                    Block block = playerLoc.getWorld().getBlockAt(x, y, z);
+                    if (block.isCollidable()) {
+                        // Even with half blocks, the distance is still shown as 1
+                        playerLoc = new Location(playerLoc.getWorld(), x, y + 1, z);
+                        break outer;
+                    }
+                }
+            }
+        }
+
+
+        Pathfinder.PathResult entityPath = m.getPathfinder().findPath(playerLoc);
 
         if (debugSetting) {
             logger.info("Performing hasPathToPlayer on " + m.getName());
@@ -75,10 +102,20 @@ public class MobDamageListener implements Listener {
         if (entityPath == null) { return false; }
 
         Location finalLoc = entityPath.getFinalPoint();
+
+        if (debugSetting) {
+            logger.info("Final pathfinding location is " + finalLoc);
+            logger.info("Player position is " + p.getLocation());
+            if (finalLoc != null) {
+                logger.info("Distance is " + playerLoc.distance(finalLoc) + " equals? " + playerLoc.equals(finalLoc));
+            }
+        }
+
         if (finalLoc == null) { return false; }
 
-        // TODO: Make configurable distance.
-        return playerLoc.distance(finalLoc) < 1;
+
+        // We found a valid block to pathfind onto earlier, this should match exactly.
+        return playerLoc.equals(finalLoc);
     }
 
     private void addPDCDamage(PersistentDataContainer mobPDC, double damage) {
